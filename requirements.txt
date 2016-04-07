@@ -1,0 +1,2 @@
+Baker==1.3
+requests==2.7.0
