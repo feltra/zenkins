@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/usr/bin/env python
 # desc: simple tool use to monitoring and discover jenkins jobs
 import os
 import sys
