@@ -43,7 +43,7 @@ def _discovery(prefix=""):
 
         elif prefix is not None:
             for job in jobs.json().get('jobs'):
-                if job.get('name').upper().startswith(prefix.upper()) and job.get('color') != "disabled":
+                if job.get('name').upper() == prefix.upper() and job.get('color') != "disabled":
                     r = SESSION.get(JENKINS_URL + "/job/" + job.get('name') + "/api/json")
                     if r.status_code == requests.codes.ok:
                         if r.json().get('jobs'):
@@ -100,7 +100,7 @@ def _rest(job_name="", branch_name="", max_time=0):
     return -1
 
 
-def _status(name="", max_time=0):
+def _status(name="", branch="", max_time=0):
     """ Get current jobs status based on its prefix and format its output so zabbix_sender can use """
     for job in json.loads(_discovery(name))['data']:
         job_name = job.get('{#JOBNAME}')
@@ -108,18 +108,28 @@ def _status(name="", max_time=0):
         branch_name_text = ""
         if branch_name != "":
             branch_name_text = "," + branch_name
-        print(HOSTNAME, "jenkins.job[" + job_name + branch_name_text + "]",
-              int(time.time()),
-              _rest(job_name,
-                    branch_name,
-                    max_time)
-              )
+        if branch == "":
+            print(HOSTNAME, "jenkins.job[" + job_name + branch_name_text + "]",
+                  int(time.time()),
+                  _rest(job_name,
+                        branch_name,
+                        max_time)
+                  )
+        else:
+            if branch.upper() == branch_name.upper():
+                print(HOSTNAME, "jenkins.job[" + job_name + branch_name_text + "]",
+                      int(time.time()),
+                      _rest(job_name,
+                            branch_name,
+                            max_time)
+                      )
+
 
 
 
 @baker.command
-def status(name="", max_time=0):
-    _status(name=name, max_time=max_time)
+def status(name="", branch="", max_time=0):
+    _status(name=name, branch=branch, max_time=max_time)
 
 
 if __name__ == "__main__":
