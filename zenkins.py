@@ -20,20 +20,42 @@ except Exception as E:
     print(E)
     sys.exit(1)
 
+SESSION = requests.session()
+SESSION.auth = (USERNAME, PASSWORD)
 
 # used by zabbix to look up for jobs that should be monitored
 def _discovery(prefix=""):
-    jobs = requests.get(JENKINS_URL + '/view/All/api/json', auth=(USERNAME, PASSWORD))
-    data = {'data': []}
-    if prefix.lower() == "":
-        for job in jobs.json().get('jobs'):
-            if job.get('color') != "disabled":
-                data['data'].append({'{#JOBNAME}': job.get('name')})
-    elif prefix is not None:
-        for job in jobs.json().get('jobs'):
-            if job.get('name').upper().startswith(prefix.upper()) and job.get('color') != "disabled":
-                data['data'].append({'{#JOBNAME}': job.get('name')})
-    return json.dumps(data)
+    jobs = SESSION.get(JENKINS_URL + '/view/All/api/json')
+    if jobs.status_code == requests.codes.ok:
+        data = {'data': []}
+        if prefix.lower() == "":
+            for job in jobs.json().get('jobs'):
+                if job.get('color') != "disabled":
+                    r = SESSION.get(JENKINS_URL + "/job/" + job.get('name') + "/api/json")
+                    if r.status_code == requests.codes.ok:
+                        if r.json().get('jobs'):
+                            for branch in r.json().get('jobs'):
+                                result = {'{#JOBNAME}': job.get('name'), '{#BRANCHNAME}': branch.get('name')}
+                                data['data'].append(result)
+                        else:
+                            result = {'{#JOBNAME}': job.get('name')}
+                            data['data'].append(result)
+
+        elif prefix is not None:
+            for job in jobs.json().get('jobs'):
+                if job.get('name').upper().startswith(prefix.upper()) and job.get('color') != "disabled":
+                    r = SESSION.get(JENKINS_URL + "/job/" + job.get('name') + "/api/json")
+                    if r.status_code == requests.codes.ok:
+                        if r.json().get('jobs'):
+                            for branch in r.json().get('jobs'):
+                                result = {'{#JOBNAME}': job.get('name'), '{#BRANCHNAME}': branch.get('name')}
+                                data['data'].append(result)
+                        else:
+                            result = {'{#JOBNAME}': job.get('name')}
+                            data['data'].append(result)
+        return json.dumps(data)
+    else:
+        jobs.raise_for_status()
 
 
 @baker.command
@@ -42,8 +64,13 @@ def discovery(prefix=""):
 
 
 # Get job data
-def _rest(name="", max_time=0):
-    r = requests.get(JENKINS_URL + '/job/' + name + '/lastBuild/api/json', auth=(USERNAME, PASSWORD), verify=False)
+def _rest(job_name="", branch_name="", max_time=0):
+    url = JENKINS_URL + '/job/' + job_name
+    if branch_name != "":
+        url = url + "/job/" + branch_name
+    url = url + '/lastBuild/api/json'
+
+    r = SESSION.get(url, verify=False)
     if r.status_code == 200:
         try:
             job = r.json()
@@ -77,8 +104,17 @@ def _status(name="", max_time=0):
     """ Get current jobs status based on its prefix and format its output so zabbix_sender can use """
     for job in json.loads(_discovery(name))['data']:
         job_name = job.get('{#JOBNAME}')
-        print(HOSTNAME, "jenkins.job[" + job_name + "]", int(time.time()),
-              _rest(job_name, max_time))
+        branch_name = job.get('{#BRANCHNAME}', "")
+        branch_name_text = ""
+        if branch_name != "":
+            branch_name_text = "," + branch_name
+        print(HOSTNAME, "jenkins.job[" + job_name + branch_name_text + "]",
+              int(time.time()),
+              _rest(job_name,
+                    branch_name,
+                    max_time)
+              )
+
 
 
 @baker.command
