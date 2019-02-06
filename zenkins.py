@@ -1,30 +1,28 @@
 #!/usr/bin/env python
 # desc: simple tool use to monitoring and discover jenkins jobs
-import os
 import sys
 import time
 import json
-import baker
+import argparse
 import requests
 from configobj import ConfigObj
 from datetime import datetime as dt
+from pathlib import Path
 
-try:
-    config = ConfigObj('zenkins.conf')
-    HOSTNAME = config.get('hostname')
-    USERNAME = config.get('username')
-    PASSWORD = config.get('password')
-    JENKINS_URL = config.get('jenkins_url')
-    PREFIX = config.get('prefix', "")
-except Exception as E:
-    print(E)
-    sys.exit(1)
+config = ConfigObj("zenkins.conf")
 
 SESSION = requests.session()
-SESSION.auth = (USERNAME, PASSWORD)
+HOSTNAME = ""
+USERNAME = ""
+PASSWORD = ""
+JENKINS_URL = ""
+PREFIX = ""
+
 
 # used by zabbix to look up for jobs that should be monitored
 def _discovery(prefix=""):
+    if JENKINS_URL == "":
+        raise requests.URLRequired("ERROR: Url required")
     jobs = SESSION.get(JENKINS_URL + '/view/All/api/json')
     if jobs.status_code == requests.codes.ok:
         data = {'data': []}
@@ -58,13 +56,15 @@ def _discovery(prefix=""):
         jobs.raise_for_status()
 
 
-@baker.command
-def discovery(prefix=""):
-    return _discovery(prefix=prefix)
+def discovery(args):
+    prefix = args.name
+    print(_discovery(prefix=prefix))
 
 
 # Get job data
 def _rest(job_name="", branch_name="", max_time=0):
+    if JENKINS_URL == "":
+        raise requests.URLRequired("ERROR: Url required")
     url = JENKINS_URL + '/job/' + job_name
     if branch_name != "":
         url = url + "/job/" + branch_name
@@ -88,14 +88,15 @@ def _rest(job_name="", branch_name="", max_time=0):
                 if current > max_time:
                     # this is when job exceeds its estimated time
                     return -2
-                else:
-                    # job is running
-                    return 2
+            if (job.get('building') is True) and (job.get('result') is None):
+                # job is running
+                return 0
+
+            # job failed
+            return -1
         except Exception as e:
             sys.stderr.write("Failed %s" % e)
             pass
-    else:
-        return r.status_code
     # job failure
     return -1
 
@@ -125,12 +126,41 @@ def _status(name="", branch="", max_time=0):
                       )
 
 
-
-
-@baker.command
-def status(name="", branch="", max_time=0):
+def status(args):
+    name = args.name
+    branch = args.branch
+    max_time = args.max_time
     _status(name=name, branch=branch, max_time=max_time)
 
 
 if __name__ == "__main__":
-    baker.run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", "-c", default="zenkins.conf", required=False)
+    sub = parser.add_subparsers()
+
+    discover = sub.add_parser('discovery')
+    discover.add_argument('name', nargs='?', default="")
+    discover.set_defaults(func=discovery)
+
+    stat = sub.add_parser('status')
+    stat.add_argument('name', nargs='?', default="")
+    stat.add_argument('branch', nargs='?', default="")
+    stat.add_argument('max_time', nargs='?', default=0)
+    stat.set_defaults(func=status)
+
+    args = parser.parse_args()
+    try:
+        Path(args.config).resolve(strict=True)
+        config = ConfigObj(args.config)
+        HOSTNAME = config.get('hostname')
+        USERNAME = config.get('username')
+        PASSWORD = config.get('password')
+        JENKINS_URL = config.get('jenkins_url')
+        PREFIX = config.get('prefix', "")
+        SESSION.auth = (USERNAME, PASSWORD)
+
+        args.func(args)
+
+    except Exception as E:
+        print(E)
+        sys.exit(1)
