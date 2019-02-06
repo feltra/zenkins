@@ -9,9 +9,8 @@ from configobj import ConfigObj
 from datetime import datetime as dt
 from pathlib import Path
 
-config = ConfigObj("zenkins.conf")
 
-SESSION = requests.session()
+SESSION = None
 HOSTNAME = ""
 USERNAME = ""
 PASSWORD = ""
@@ -150,6 +149,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     try:
+        SESSION = requests.session()
         Path(args.config).resolve(strict=True)
         config = ConfigObj(args.config)
         HOSTNAME = config.get('hostname')
@@ -158,6 +158,12 @@ if __name__ == "__main__":
         JENKINS_URL = config.get('jenkins_url')
         PREFIX = config.get('prefix', "")
         SESSION.auth = (USERNAME, PASSWORD)
+
+        # Lazy validation :-)
+        if HOSTNAME == "":
+            raise requests.URLRequired("ERROR: Hostname Required!")
+        if JENKINS_URL == "":
+            raise requests.URLRequired("ERROR: Jenkins Url Required!")
 
         args.func(args)
 
